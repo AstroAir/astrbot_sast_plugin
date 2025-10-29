@@ -22,7 +22,7 @@ A comprehensive content monitoring and analysis plugin for AstrBot, providing Bi
 
 ### ⏰ Advanced Scheduling
 
-- **Cron Support**: Use cron expressions for flexible scheduling (e.g., "0 9,12,18 * * *")
+- **Cron Support**: Use cron expressions for flexible scheduling (e.g., "0 9,12,18 ** *")
 - **Multiple Tasks**: Independent schedules for Bilibili and Zhihu monitoring
 - **Error Recovery**: Exponential backoff and circuit breaker patterns
 - **Task Monitoring**: Health checks and status reporting
@@ -65,6 +65,7 @@ A comprehensive content monitoring and analysis plugin for AstrBot, providing Bi
 Get video description and optionally extract/summarize links.
 
 **Flags:**
+
 - `--extract`: Extract URLs from description
 - `--max N`: Maximum URLs to process (default: 3)
 - `--depth basic|advanced`: Tavily extraction depth
@@ -72,6 +73,7 @@ Get video description and optionally extract/summarize links.
 - `--summarize`: Generate AI summaries of extracted content
 
 **Examples:**
+
 ```
 /bili_desc BV1xx411c7mD
 /bili_desc BV1xx411c7mD --extract --max 3
@@ -85,6 +87,7 @@ Get latest video from a Bilibili user and optionally extract/summarize links.
 **Flags:** Same as `/bili_desc`
 
 **Examples:**
+
 ```
 /bili_latest 285286947
 /bili_latest 285286947 --extract --max 2
@@ -209,12 +212,14 @@ See `config_example.json` for a complete configuration example.
 ```
 
 **Chart Styles:**
+
 - `seaborn-v0_8-darkgrid` - Dark grid (recommended)
 - `ggplot` - R ggplot2 style
 - `bmh` - Bayesian Methods for Hackers style
 - `fivethirtyeight` - FiveThirtyEight news style
 
 **Color Schemes:**
+
 - `default` - Standard colors
 - `pastel` - Soft, pastel colors
 - `vibrant` - Bright, vibrant colors
