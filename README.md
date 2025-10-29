@@ -37,6 +37,19 @@ A comprehensive content monitoring and analysis plugin for AstrBot, providing Bi
 - **Multiple Formats**: Markdown, plain text, and HTML output (planned)
 - **Customizable**: Configurable importance thresholds and item limits
 
+### 📈 Data Visualization
+
+- **Beautiful Charts**: Automatically generate charts for daily reports using matplotlib
+- **Multiple Chart Types**:
+  - Category distribution (bar chart)
+  - Importance score distribution (histogram)
+  - Top content sources (horizontal bar chart)
+  - Activity heatmap (7 days × 24 hours posting patterns)
+  - Content timeline (line chart showing volume over time)
+- **Flexible Output**: PNG, JPG, or base64-encoded images
+- **Customizable Styling**: Multiple color schemes and matplotlib styles
+- **Optional**: Gracefully disabled if matplotlib not installed
+
 ## Installation
 
 1. Install the plugin in your AstrBot plugins directory
@@ -180,6 +193,32 @@ See `config_example.json` for a complete configuration example.
 }
 ```
 
+### Chart Visualization
+
+```json
+{
+  "chart_enabled": true,
+  "chart_output_format": "png",
+  "chart_dpi": 100,
+  "chart_figsize": [10, 6],
+  "chart_style": "seaborn-v0_8-darkgrid",
+  "chart_color_scheme": "default",
+  "chart_save_to_file": false,
+  "chart_output_dir": "data/charts"
+}
+```
+
+**Chart Styles:**
+- `seaborn-v0_8-darkgrid` - Dark grid (recommended)
+- `ggplot` - R ggplot2 style
+- `bmh` - Bayesian Methods for Hackers style
+- `fivethirtyeight` - FiveThirtyEight news style
+
+**Color Schemes:**
+- `default` - Standard colors
+- `pastel` - Soft, pastel colors
+- `vibrant` - Bright, vibrant colors
+
 ### API Keys
 
 ```json
@@ -221,6 +260,7 @@ astrbot-plugin-sast/
 └── utils/                       # Reusable utilities
     ├── command_utils.py        # Command processing
     ├── link_extractor.py       # Bilibili link extraction
+    ├── chart_generator.py      # Chart visualization
     ├── openrouter_client.py    # OpenRouter API
     └── tavily_client.py        # Tavily API
 ```
@@ -239,6 +279,8 @@ For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
 - `httpx`: Async HTTP client
 - `feedparser`: RSS/Atom feed parser
 - `apscheduler`: Advanced task scheduling (optional)
+- `matplotlib`: Chart and visualization generation (optional)
+- `numpy`: Numerical operations (dependency of matplotlib)
 - `aiofiles`: Async file I/O
 - `beautifulsoup4`: HTML parsing
 
