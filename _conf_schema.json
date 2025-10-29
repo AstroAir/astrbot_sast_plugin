@@ -1,0 +1,235 @@
+{
+  "enabled": {
+    "description": "是否启用定时监控功能",
+    "type": "bool",
+    "default": false,
+    "hint": "启用后将按照设定的时间间隔自动检查 UP 主的最新视频"
+  },
+  "check_interval": {
+    "description": "检查间隔（分钟）",
+    "type": "int",
+    "default": 30,
+    "hint": "每隔多少分钟检查一次 UP 主的最新视频，建议不低于 5 分钟以避免频繁请求"
+  },
+  "up_masters": {
+    "description": "监控的 UP 主列表",
+    "type": "list",
+    "default": [],
+    "hint": "UP 主配置列表，每个 UP 主包含 mid（用户ID）和 name（备注名称）",
+    "items": {
+      "mid": {
+        "description": "UP 主的 mid（用户ID）",
+        "type": "string",
+        "hint": "B站用户的唯一标识符，可以从用户主页 URL 中获取"
+      },
+      "name": {
+        "description": "UP 主备注名称",
+        "type": "string",
+        "hint": "用于在报告中显示的名称，方便识别"
+      }
+    }
+  },
+  "target_groups": {
+    "description": "消息发送目标",
+    "type": "list",
+    "default": [],
+    "hint": "消息将发送到这些目标。格式：platform_name:message_type:session_id，例如 aiocqhttp:group:123456789"
+  },
+  "ai_summary_enabled": {
+    "description": "是否启用 AI 总结",
+    "type": "bool",
+    "default": true,
+    "hint": "启用后将使用 AI 对 UP 主的视频信息进行智能总结和分析"
+  },
+  "ai_prompt_template": {
+    "description": "AI 总结提示词模板",
+    "type": "text",
+    "default": "你是一个专业的 B 站内容分析助手。请分析以下 UP 主的最新视频信息，生成一份简洁的总结报告。\n\n要求：\n1. 总结视频的主要内容和亮点\n2. 分析视频数据（播放量、点赞等）的表现\n3. 提取关键信息点\n4. 保持客观、准确、易读\n\n请用中文输出，使用 Markdown 格式。",
+    "hint": "自定义 AI 总结的提示词，可以根据需求调整分析角度和输出格式"
+  },
+  "max_videos_per_check": {
+    "description": "每次检查获取的最大视频数",
+    "type": "int",
+    "default": 5,
+    "hint": "每次检查时获取 UP 主的最新 N 个视频，用于检测新上传"
+  },
+  "include_video_stats": {
+    "description": "是否包含视频统计数据",
+    "type": "bool",
+    "default": true,
+    "hint": "在报告中包含播放量、点赞数等统计信息"
+  },
+  "markdown_style": {
+    "description": "Markdown 报告样式",
+    "type": "string",
+    "default": "detailed",
+    "options": ["simple", "detailed", "compact"],
+    "hint": "simple: 简洁模式，仅标题和链接；detailed: 详细模式，包含完整信息；compact: 紧凑模式，表格展示"
+  },
+  "openrouter_api_key": {
+    "description": "OpenRouter API Key",
+    "type": "string",
+    "default": "",
+    "hint": "用于 AI 总结的 OpenRouter API 密钥。如果为空，将尝试从环境变量 OPENROUTER_API_KEY 读取",
+    "obvious_hint": true
+  },
+  "openrouter_model": {
+    "description": "OpenRouter 模型",
+    "type": "string",
+    "default": "minimax/minimax-m2:free",
+    "hint": "使用的 AI 模型，默认使用免费的 minimax 模型"
+  },
+  "send_summary_only": {
+    "description": "仅发送 AI 总结",
+    "type": "bool",
+    "default": false,
+    "hint": "启用后仅发送 AI 总结内容，不发送原始视频信息"
+  },
+  "batch_send_delay": {
+    "description": "批量发送延迟（秒）",
+    "type": "int",
+    "default": 2,
+    "hint": "多条消息之间的发送间隔，避免消息发送过快被限流"
+  },
+  "zhihu_feeds": {
+    "description": "知乎 RSS 订阅源列表",
+    "type": "list",
+    "default": [],
+    "hint": "知乎 RSS 订阅源配置列表，用于监控知乎内容更新",
+    "items": {
+      "feed_url": {
+        "description": "RSS 订阅源 URL",
+        "type": "string",
+        "hint": "知乎 RSS 订阅源的完整 URL 地址"
+      },
+      "name": {
+        "description": "订阅源名称",
+        "type": "string",
+        "hint": "用于在报告中显示的订阅源名称"
+      },
+      "enabled": {
+        "description": "是否启用",
+        "type": "bool",
+        "default": true,
+        "hint": "是否启用此订阅源的监控"
+      },
+      "check_bilibili_links": {
+        "description": "检查 B站链接",
+        "type": "bool",
+        "default": true,
+        "hint": "是否从内容中提取 B站视频链接"
+      }
+    }
+  },
+  "zhihu_check_interval": {
+    "description": "知乎检查间隔（分钟）",
+    "type": "int",
+    "default": 60,
+    "hint": "每隔多少分钟检查一次知乎 RSS 订阅源，建议不低于 30 分钟"
+  },
+  "use_advanced_scheduler": {
+    "description": "使用高级调度器",
+    "type": "bool",
+    "default": true,
+    "hint": "启用后使用 APScheduler 提供 cron 表达式支持和更强大的调度功能"
+  },
+  "bilibili_cron": {
+    "description": "B站监控 Cron 表达式",
+    "type": "string",
+    "default": "",
+    "hint": "使用 cron 表达式定时检查（例如 '0 9,12,18 * * *' 表示每天 9点、12点、18点检查）。留空则使用 check_interval"
+  },
+  "zhihu_cron": {
+    "description": "知乎监控 Cron 表达式",
+    "type": "string",
+    "default": "",
+    "hint": "使用 cron 表达式定时检查知乎订阅源。留空则使用 zhihu_check_interval"
+  },
+  "daily_report_enabled": {
+    "description": "启用每日报告",
+    "type": "bool",
+    "default": false,
+    "hint": "启用后将每天生成一份汇总报告，包含所有监控内容的智能分析"
+  },
+  "daily_report_time": {
+    "description": "每日报告生成时间",
+    "type": "string",
+    "default": "09:00",
+    "hint": "每日报告的生成时间（HH:MM 格式），例如 '09:00' 表示每天早上 9 点"
+  },
+  "daily_report_categorize": {
+    "description": "报告内容分类",
+    "type": "bool",
+    "default": true,
+    "hint": "是否将报告内容按类别（技术、娱乐、教育等）自动分类"
+  },
+  "daily_report_ai_summary": {
+    "description": "生成 AI 摘要",
+    "type": "bool",
+    "default": true,
+    "hint": "是否为每日报告生成 AI 智能摘要和趋势分析"
+  },
+  "daily_report_min_importance": {
+    "description": "最低重要度",
+    "type": "float",
+    "default": 0.3,
+    "hint": "只包含重要度评分高于此值的内容（0.0-1.0），较高的值会过滤掉更多内容"
+  },
+  "daily_report_max_items": {
+    "description": "每类最大条目数",
+    "type": "int",
+    "default": 10,
+    "hint": "每个类别最多包含的内容条目数"
+  },
+  "chart_enabled": {
+    "description": "启用图表生成",
+    "type": "bool",
+    "default": true,
+    "hint": "为每日报告生成可视化图表（需要安装 matplotlib）"
+  },
+  "chart_output_format": {
+    "description": "图表输出格式",
+    "type": "string",
+    "default": "png",
+    "options": ["png", "jpg", "base64"],
+    "hint": "png/jpg: 保存为图片文件；base64: 编码为 base64 字符串"
+  },
+  "chart_dpi": {
+    "description": "图表分辨率 (DPI)",
+    "type": "int",
+    "default": 100,
+    "hint": "图表的分辨率，越高越清晰但文件越大。推荐值：100-300"
+  },
+  "chart_figsize": {
+    "description": "图表尺寸 [宽, 高]",
+    "type": "list",
+    "default": [10, 6],
+    "hint": "图表的宽度和高度（英寸），例如 [10, 6] 表示 10x6 英寸"
+  },
+  "chart_style": {
+    "description": "图表样式",
+    "type": "string",
+    "default": "seaborn-v0_8-darkgrid",
+    "hint": "matplotlib 样式名称，例如 'seaborn-v0_8-darkgrid', 'ggplot', 'bmh' 等"
+  },
+  "chart_color_scheme": {
+    "description": "图表配色方案",
+    "type": "string",
+    "default": "default",
+    "options": ["default", "pastel", "vibrant"],
+    "hint": "default: 标准配色；pastel: 柔和配色；vibrant: 鲜艳配色"
+  },
+  "chart_save_to_file": {
+    "description": "保存图表到文件",
+    "type": "bool",
+    "default": false,
+    "hint": "是否将生成的图表保存到本地文件（保存在 data/charts/ 目录）"
+  },
+  "chart_output_dir": {
+    "description": "图表输出目录",
+    "type": "string",
+    "default": "data/charts",
+    "hint": "图表文件的保存目录（仅在 chart_save_to_file 启用时有效）"
+  }
+}
+
