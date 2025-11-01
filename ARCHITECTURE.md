@@ -3,6 +3,7 @@
 ## Overview
 
 This plugin provides comprehensive content monitoring and analysis tools for the AstrBot framework, including:
+
 - **Bilibili Monitoring**: Video description fetching, link extraction, AI summarization, and UP master monitoring
 - **Zhihu RSS Monitoring**: RSS feed subscription with Bilibili link extraction
 - **Advanced Scheduling**: Cron-like scheduling with error recovery and task monitoring
@@ -46,6 +47,7 @@ astrbot-plugin-sast/
 ### Core Modules (`core/`)
 
 #### `bilibili_api.py`
+
 - **Purpose**: Bilibili API integration
 - **Key Functions**:
   - `get_bilibili_description(identifier)`: Fetch video description by BV/AV ID
@@ -54,6 +56,7 @@ astrbot-plugin-sast/
 - **Dependencies**: httpx, models.bilibili
 
 #### `monitor.py`
+
 - **Purpose**: UP master monitoring and new video detection
 - **Key Classes**:
   - `BilibiliMonitor`: Manages monitoring logic for multiple UP masters
@@ -107,7 +110,7 @@ astrbot-plugin-sast/
   - `TaskConfig`: Configuration for scheduled tasks
   - `TaskStatus`: Status information for tasks
 - **Key Features**:
-  - Cron expression support (e.g., "0 9 * * *")
+  - Cron expression support (e.g., "0 9 ** *")
   - Interval-based scheduling (minutes/hours)
   - Error recovery with exponential backoff
   - Task monitoring and health checks
@@ -154,6 +157,7 @@ astrbot-plugin-sast/
 ### Services (`services/`)
 
 #### `ai_summarizer.py`
+
 - **Purpose**: AI-powered video content analysis
 - **Key Classes**:
   - `AISummarizer`: Orchestrates AI summarization workflow
@@ -230,6 +234,7 @@ astrbot-plugin-sast/
 ### Utilities (`utils/`)
 
 #### `command_utils.py`
+
 - **Purpose**: Shared command processing logic (eliminates code duplication)
 - **Key Functions**:
   - `parse_command_flags(argv)`: Parse command-line flags
@@ -237,6 +242,7 @@ astrbot-plugin-sast/
 - **Dependencies**: utils.tavily_client, utils.openrouter_client
 
 #### `openrouter_client.py`
+
 - **Purpose**: OpenRouter API integration for AI summarization
 - **Key Functions**:
   - `summarize_batch(pairs, options)`: Batch summarize URL contents
@@ -299,6 +305,7 @@ astrbot-plugin-sast/
 **Inherits**: `Star` (AstrBot plugin base class)
 
 **Initialization**:
+
 - Loads configuration from AstrBot context
 - Initializes state manager and monitor
 - Sets up AI summarizer (if enabled)
@@ -308,6 +315,7 @@ astrbot-plugin-sast/
 ### Commands
 
 #### `/bili_desc <bvid|aid> [flags]`
+
 - **Purpose**: Fetch video description and optionally extract/summarize links
 - **Flags**:
   - `--extract`: Extract URLs from description
@@ -318,6 +326,7 @@ astrbot-plugin-sast/
 - **Implementation**: Uses `extract_and_summarize_urls()` utility to eliminate code duplication
 
 #### `/bili_latest <mid> [flags]`
+
 - **Purpose**: Fetch latest video from user and optionally extract/summarize links
 - **Flags**: Same as `/bili_desc`
 - **Implementation**: Uses `extract_and_summarize_urls()` utility to eliminate code duplication
@@ -425,6 +434,7 @@ See `_conf_schema.json` for the complete configuration schema. Key settings:
 - `chart_output_dir`: Directory for saved charts (default: data/charts)
 
 **Available Chart Types**:
+
 - Category distribution (bar chart)
 - Importance score distribution (histogram)
 - Top content sources (horizontal bar chart)
@@ -447,23 +457,27 @@ See `_conf_schema.json` for the complete configuration schema. Key settings:
 ## Design Principles
 
 ### 1. Separation of Concerns
+
 - **Core**: Business logic and external API integration
 - **Models**: Data structures and serialization
 - **Services**: High-level orchestration
 - **Utils**: Reusable, stateless utilities
 
 ### 2. Code Reusability
+
 - Shared command processing logic in `utils/command_utils.py`
 - Eliminates ~100 lines of duplicated code between `/bili_desc` and `/bili_latest`
 - Consistent API client patterns across `tavily_client.py` and `openrouter_client.py`
 
 ### 3. Maintainability
+
 - Clear module boundaries
 - Comprehensive docstrings
 - Type hints throughout
 - Consistent error handling
 
 ### 4. AstrBot Compatibility
+
 - Preserves required plugin structure (Star class, @register decorator)
 - Uses async/await patterns with yield for passive responses
 - Maintains backward compatibility with existing configurations
@@ -626,4 +640,3 @@ New modules added:
 - ✅ Bilibili state file format preserved
 - ✅ Existing configurations continue to work
 - ✅ New features are opt-in via configuration
-

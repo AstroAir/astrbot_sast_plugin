@@ -133,6 +133,7 @@ class MonitorState:
     """Overall monitoring state for all UP masters."""
     up_masters: dict[str, UPMasterState] = field(default_factory=dict)
     last_save_time: int = 0
+    content_history: list[dict[str, Any]] = field(default_factory=list)  # Searchable content history
 
     @classmethod
     def load_from_file(cls, file_path: Path) -> MonitorState:
@@ -145,6 +146,7 @@ class MonitorState:
                 data = json.load(f)
                 state = cls()
                 state.last_save_time = data.get("last_save_time", 0)
+                state.content_history = data.get("content_history", [])
                 for mid, up_data in data.get("up_masters", {}).items():
                     state.up_masters[mid] = UPMasterState.from_dict(up_data)
                 return state
@@ -155,13 +157,14 @@ class MonitorState:
     def save_to_file(self, file_path: Path) -> None:
         """Save state to JSON file."""
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         data = {
             "last_save_time": int(datetime.now().timestamp()),
             "up_masters": {
                 mid: state.to_dict()
                 for mid, state in self.up_masters.items()
-            }
+            },
+            "content_history": self.content_history
         }
 
         with open(file_path, 'w', encoding='utf-8') as f:
@@ -175,6 +178,16 @@ class MonitorState:
                 last_check_time=0
             )
         return self.up_masters[mid]
+
+    def add_content_to_history(self, content_item: dict[str, Any]) -> None:
+        """Add a content item to searchable history."""
+        self.content_history.append(content_item)
+
+    def cleanup_old_history(self, max_items: int = 1000) -> None:
+        """Remove old content history to prevent state file from growing too large."""
+        if len(self.content_history) > max_items:
+            # Keep only the most recent items
+            self.content_history = self.content_history[-max_items:]
 
 
 @dataclass(slots=True)

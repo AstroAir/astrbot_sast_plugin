@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 
 try:
-    import feedparser
+    import feedparser  # type: ignore
     FEEDPARSER_AVAILABLE = True
 except ImportError:
     FEEDPARSER_AVAILABLE = False

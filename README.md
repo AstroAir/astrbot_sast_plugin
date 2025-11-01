@@ -104,11 +104,9 @@ Manually trigger monitoring check for configured UP masters.
 /bili_monitor
 ```
 
-### `/zhihu_check` ⚠️ (Not Yet Implemented)
+### `/zhihu_check`
 
 Manually trigger Zhihu RSS feed check.
-
-**Note**: The backend functionality is implemented, but the command handler needs to be added to main.py.
 
 **Example:**
 
@@ -116,16 +114,114 @@ Manually trigger Zhihu RSS feed check.
 /zhihu_check
 ```
 
-### `/daily_report` ⚠️ (Not Yet Implemented)
+### `/daily_report [--days N]`
 
-Manually generate daily content report.
+Manually generate daily content report with AI summaries and visualizations.
 
-**Note**: The backend functionality is implemented, but the command handler needs to be added to main.py. Additionally, the daily report generation needs to store recent reports in state for proper aggregation.
+**Flags:**
 
-**Example:**
+- `--days N`: Generate report for last N days (default: 1, max: 7)
+
+**Examples:**
 
 ```bash
 /daily_report
+/daily_report --days 3
+```
+
+**Note**: The daily report aggregates content from monitoring tasks. For best results, enable automatic monitoring to continuously collect content. Current implementation has a limitation where historical report data is not persisted in state.
+
+### `/search <keywords> [options]`
+
+Search through monitored content with keyword matching and advanced filtering.
+
+**Flags:**
+
+- `--category <category>`: Filter by category (technology/entertainment/education/news/lifestyle/other)
+- `--source <source>`: Filter by source (bilibili/zhihu)
+- `--days <N>`: Search within last N days
+- `--limit <N>`: Limit number of results (default: 20)
+- `--sort <method>`: Sort by relevance/date/importance (default: relevance)
+
+**Examples:**
+
+```bash
+/search Python 机器学习
+/search 编程 --category technology
+/search --source bilibili --days 7
+/search AI --limit 10 --sort importance
+```
+
+### `/filter [options]`
+
+Filter monitored content by various criteria without keyword search.
+
+**Flags:**
+
+- `--category <category>`: Filter by category
+- `--source <source>`: Filter by source
+- `--min-importance <score>`: Minimum importance score (0.0-1.0)
+- `--max-importance <score>`: Maximum importance score (0.0-1.0)
+- `--days <N>`: Filter within last N days
+- `--limit <N>`: Limit number of results (default: 20)
+- `--sort <method>`: Sort by date/importance (default: date)
+
+**Examples:**
+
+```bash
+/filter --category technology
+/filter --source bilibili --min-importance 0.7
+/filter --days 7 --limit 15
+```
+
+### `/export [options]`
+
+Export daily reports in multiple formats (JSON, Markdown, HTML).
+
+**Flags:**
+
+- `--days <N>`: Generate report for last N days (default: 1)
+- `--format <format>`: Export format (json/markdown/html, default: json)
+- `--charts`: Include charts in export
+- `--output <filename>`: Custom output filename
+
+**Examples:**
+
+```bash
+/export
+/export --format markdown
+/export --days 7 --format html --charts
+/export --format json --output my_report.json
+```
+
+### `/archive [action] [options]`
+
+Manage report archives for long-term storage and analysis.
+
+**Actions:**
+
+- `list`: List archived reports (default)
+- `save`: Archive current daily report
+- `view <id>`: View archived report details
+- `delete <id>`: Delete an archived report
+- `cleanup`: Delete old archives (90+ days)
+- `stats`: Show archive statistics
+
+**Flags (for list):**
+
+- `--days <N>`: List archives from last N days
+- `--limit <N>`: Limit number of results
+
+**Examples:**
+
+```bash
+/archive
+/archive list --days 30
+/archive save
+/archive view 20250101
+/archive delete 20250101
+/archive cleanup
+/archive stats
 ```
 
 ## Configuration

@@ -8,14 +8,15 @@ Provides comprehensive content monitoring and analysis tools including:
 - Advanced scheduling with cron support
 - AI-powered daily reports with content aggregation
 """
-from astrbot.api.event import filter, AstrMessageEvent, MessageChain
-from astrbot.api.star import Context, Star, register
-from astrbot.api import logger
+from astrbot.api.event import filter, AstrMessageEvent, MessageChain  # type: ignore
+from astrbot.api.star import Context, Star, register  # type: ignore
+from astrbot.api import logger  # type: ignore
 
 import os
 import asyncio
 from pathlib import Path
 from datetime import datetime, timedelta
+from typing import Any
 
 # Core modules
 from core.bilibili_api import (
@@ -40,13 +41,16 @@ from services.formatter import MarkdownFormatter
 from services.zhihu_formatter import ZhihuFormatter
 from services.report_aggregator import ReportAggregator
 from services.daily_report import DailyReportGenerator
+from services.content_search import ContentSearchEngine, SearchQuery
+from services.export_service import ReportExporter
+from services.archive_service import ArchiveManager
 
 # Utilities
 from utils.command_utils import (
     parse_command_flags,
     extract_and_summarize_urls,
 )
-from utils.chart_generator import ChartConfig, chart_available
+from utils.chart_generator import ChartConfig, is_available as chart_available
 
 
 @register("astrbot-sast", "AstroAir", "内容监控与分析工具集 (Bilibili/Zhihu/AI报告)", "2.0.0")
@@ -58,8 +62,12 @@ class SASTPlugin(Star):
     - /bili_desc: Get video description and optionally extract/summarize links
     - /bili_latest: Get latest video from a user and optionally extract/summarize links
     - /bili_monitor: Manually trigger monitoring check for configured UP masters
-    - /zhihu_check: Manually trigger Zhihu RSS feed check (planned)
-    - /daily_report: Manually generate daily content report (planned)
+    - /zhihu_check: Manually trigger Zhihu RSS feed check
+    - /daily_report: Manually generate daily content report with AI summaries and charts
+    - /search: Search through monitored content with keyword search
+    - /filter: Filter monitored content by category, source, importance, and date
+    - /export: Export daily reports in multiple formats (JSON, Markdown, HTML)
+    - /archive: Manage report archives (list, view, delete)
 
     Background tasks:
     - Bilibili UP master monitoring
@@ -71,7 +79,7 @@ class SASTPlugin(Star):
         super().__init__(context)
 
         # Get configuration from context
-        self.config = {}
+        self.config: dict[str, Any] = {}
         if hasattr(context, 'config_helper') and context.config_helper:
             self.config = context.config_helper.get_all() or {}
 
@@ -91,6 +99,9 @@ class SASTPlugin(Star):
         self.zhihu_formatter: ZhihuFormatter | None = None
         self.report_aggregator: ReportAggregator | None = None
         self.daily_report_generator: DailyReportGenerator | None = None
+        self.search_engine: ContentSearchEngine = ContentSearchEngine()
+        self.report_exporter: ReportExporter = ReportExporter()
+        self.archive_manager: ArchiveManager = ArchiveManager()
 
         # Scheduler
         self.scheduler: SchedulerManager | None = None
@@ -306,6 +317,9 @@ class SASTPlugin(Star):
         # Send notifications
         await self._send_bilibili_reports(reports_with_videos)
 
+        # Save to content history for search
+        await self._save_bilibili_to_history(reports_with_videos)
+
     async def _check_all_zhihu_feeds(self):
         """Check all configured Zhihu RSS feeds for new items."""
         zhihu_feeds_config = self.config.get("zhihu_feeds", [])
@@ -349,33 +363,47 @@ class SASTPlugin(Star):
         # Send notifications
         await self._send_zhihu_reports(reports_with_items)
 
-    async def _generate_daily_report(self):
-        """Generate and send daily content report."""
+        # Save to content history for search
+        await self._save_zhihu_to_history(reports_with_items)
+
+    async def _generate_daily_report(self, days: int = 1):
+        """Generate and send daily content report.
+
+        Args:
+            days: Number of days to include in the report (default: 1)
+        """
         if not self.daily_report_generator or not self.report_aggregator:
             logger.warning("每日报告生成器未初始化，跳过生成")
-            return
+            return None
 
-        logger.info("开始生成每日内容报告...")
+        logger.info(f"开始生成 {days} 天的内容报告...")
 
         try:
-            # Collect content from last 24 hours
-            since = datetime.now() - timedelta(days=1)
+            # Collect content from last N days
+            since = datetime.now() - timedelta(days=days)
 
             # Get Bilibili reports (from state)
-            bili_state = await self.bili_state_manager.load_state()
-            bili_reports = []  # Would need to store recent reports in state
+            # Note: Current implementation doesn't store historical reports in state
+            bili_reports: list[Any] = []  # Would need to store recent reports in state
 
             # Get Zhihu reports (from state)
-            zhihu_state = await self.zhihu_state_manager.load_state()
-            zhihu_reports = []  # Would need to store recent reports in state
+            # Note: Current implementation doesn't store historical reports in state
+            zhihu_reports: list[Any] = []  # Would need to store recent reports in state
 
             # Create report config
             report_config = DailyReportConfig(
-                categorize=self.config.get("daily_report_categorize", True),
-                ai_summary=self.config.get("daily_report_ai_summary", True),
-                min_importance=self.config.get("daily_report_min_importance", 0.3),
+                enabled=True,
+                generation_time=self.config.get("daily_report_time", "09:00"),
+                include_bilibili=True,
+                include_zhihu=True,
+                categorize_content=self.config.get("daily_report_categorize", True),
+                generate_ai_summary=self.config.get("daily_report_ai_summary", True),
+                highlight_important=True,
                 max_items_per_category=self.config.get("daily_report_max_items", 10),
-                output_format="markdown"
+                min_importance_score=self.config.get("daily_report_min_importance", 0.3),
+                output_format="markdown",
+                include_statistics=True,
+                include_trending=True
             )
 
             # Aggregate content
@@ -383,12 +411,14 @@ class SASTPlugin(Star):
                 bilibili_reports=bili_reports,
                 zhihu_reports=zhihu_reports,
                 since=since,
-                min_importance=report_config.min_importance,
+                min_importance=report_config.min_importance_score,
                 max_items_per_category=report_config.max_items_per_category
             )
 
             # Generate report with charts
             chart_enabled = self.config.get("chart_enabled", True)
+            markdown: str | None
+            charts: dict[str, str | bytes]
             if chart_enabled and self.daily_report_generator.chart_generator:
                 result = await self.daily_report_generator.generate(report, report_config, include_charts=True)
                 if isinstance(result, tuple):
@@ -397,18 +427,25 @@ class SASTPlugin(Star):
                     markdown = result
                     charts = {}
             else:
-                markdown = await self.daily_report_generator.generate(report, report_config, include_charts=False)
-                charts = {}
+                result = await self.daily_report_generator.generate(report, report_config, include_charts=False)
+                if isinstance(result, tuple):
+                    markdown, charts = result
+                else:
+                    markdown = result
+                    charts = {}
 
             if markdown:
                 # Send to configured targets
                 await self._send_daily_report(markdown, charts)
                 logger.info("每日报告生成并发送成功")
+                return report
             else:
                 logger.warning("每日报告生成失败或无内容")
+                return None
 
         except Exception as e:
             logger.error(f"生成每日报告失败: {e}")
+            return None
 
     async def _send_bilibili_reports(self, reports: list):
         """Send Bilibili monitor reports to configured targets."""
@@ -456,8 +493,6 @@ class SASTPlugin(Star):
         if not self.zhihu_formatter:
             return
 
-        batch_delay = self.config.get("batch_send_delay", 2)
-
         for target in target_groups:
             try:
                 # Format and send reports
@@ -469,6 +504,89 @@ class SASTPlugin(Star):
                 logger.info(f"已发送 Zhihu 报告到 {target}")
             except Exception as e:
                 logger.error(f"发送 Zhihu 报告到 {target} 失败: {e}")
+
+    async def _save_bilibili_to_history(self, reports: list):
+        """Save Bilibili reports to content history for search."""
+        try:
+            from models.report import ContentItem, ContentSource, ContentCategory
+
+            state = self.bili_state_manager.load_state()
+
+            for report in reports:
+                for video in report.new_videos:
+                    # Create ContentItem
+                    content_item = ContentItem(
+                        title=video.title,
+                        url=video.get_url(),
+                        source=ContentSource.BILIBILI,
+                        published=video.get_publish_datetime(),
+                        author=report.up_master_name,
+                        summary=video.desc[:500] if video.desc else None,
+                        category=ContentCategory.OTHER,  # Could be improved with categorization
+                        importance_score=0.5,  # Could be improved with scoring
+                        source_data={
+                            "bvid": video.bvid,
+                            "aid": video.aid,
+                            "up_mid": report.up_master_mid,
+                            "play_count": video.play_count,
+                            "like_count": video.like_count
+                        }
+                    )
+
+                    # Add to history
+                    state.add_content_to_history(content_item.to_dict())
+
+            # Cleanup old history
+            state.cleanup_old_history(max_items=1000)
+
+            # Save state
+            self.bili_state_manager.save_state()
+
+            logger.debug(f"已保存 {sum(len(r.new_videos) for r in reports)} 条 Bilibili 内容到历史记录")
+
+        except Exception as e:
+            logger.error(f"保存 Bilibili 内容历史失败: {e}")
+
+    async def _save_zhihu_to_history(self, reports: list):
+        """Save Zhihu reports to content history for search."""
+        try:
+            from models.report import ContentItem, ContentSource, ContentCategory
+
+            state = self.zhihu_state_manager.load_state()
+
+            for report in reports:
+                for item in report.new_items:
+                    # Create ContentItem
+                    content_item = ContentItem(
+                        title=item.title,
+                        url=item.link,
+                        source=ContentSource.ZHIHU,
+                        published=item.published,
+                        author=item.author,
+                        summary=item.description[:500] if item.description else None,
+                        category=ContentCategory.OTHER,  # Could be improved with categorization
+                        importance_score=0.5,  # Could be improved with scoring
+                        source_data={
+                            "guid": item.guid,
+                            "feed_url": report.feed_url,
+                            "feed_name": report.feed_name,
+                            "bilibili_links": item.bilibili_links
+                        }
+                    )
+
+                    # Add to history
+                    state.add_content_to_history(content_item.to_dict())
+
+            # Cleanup old history
+            state.cleanup_old_history(max_items=1000)
+
+            # Save state
+            self.zhihu_state_manager.save_state()
+
+            logger.debug(f"已保存 {sum(len(r.new_items) for r in reports)} 条 Zhihu 内容到历史记录")
+
+        except Exception as e:
+            logger.error(f"保存 Zhihu 内容历史失败: {e}")
 
     async def _send_daily_report(self, markdown: str, charts: dict[str, str | bytes] | None = None):
         """Send daily report to configured targets with optional charts."""
@@ -686,6 +804,196 @@ class SASTPlugin(Star):
             logger.error(f"手动检查失败: {e}")
             yield event.plain_result(f"检查失败：{e}")
 
+    @filter.command("zhihu_check")
+    async def zhihu_check_cmd(self, event: AstrMessageEvent):
+        """
+        Manually trigger Zhihu RSS feed check.
+
+        Usage: /zhihu_check
+        """
+        zhihu_feeds_config = self.config.get("zhihu_feeds", [])
+        if not zhihu_feeds_config:
+            yield event.plain_result("未配置知乎 RSS 订阅源，请先在配置中添加订阅源。")
+            return
+
+        yield event.plain_result("开始检查知乎 RSS 订阅源...")
+
+        try:
+            # Parse feed configs
+            feeds = []
+            for feed_config in zhihu_feeds_config:
+                if isinstance(feed_config, dict) and feed_config.get("enabled", True):
+                    feeds.append(ZhihuFeedConfig.from_dict(feed_config))
+
+            if not feeds:
+                yield event.plain_result("没有启用的订阅源。")
+                return
+
+            # Load state
+            state = self.zhihu_state_manager.load_state()
+
+            # Check feeds
+            reports = await self.zhihu_client.check_multiple_feeds(
+                feeds,
+                state,
+                delay_between_checks=1.0
+            )
+
+            # Save state
+            self.zhihu_state_manager.save_state()
+
+            # Filter reports with new items
+            reports_with_items = [r for r in reports if r.new_items]
+
+            if not reports_with_items:
+                yield event.plain_result("没有发现新内容。")
+                return
+
+            yield event.plain_result(f"发现 {len(reports_with_items)} 个订阅源有新内容，正在生成报告...")
+
+            # Format and send report
+            if self.zhihu_formatter:
+                markdown = self.zhihu_formatter.format_multiple_reports(reports_with_items)
+                if markdown:
+                    yield event.plain_result(markdown)
+
+        except Exception as e:
+            logger.error(f"知乎检查失败: {e}")
+            yield event.plain_result(f"检查失败：{e}")
+
+    @filter.command("daily_report")
+    async def daily_report_cmd(self, event: AstrMessageEvent):
+        """
+        Manually generate and view daily content report.
+
+        Usage: /daily_report [--days N]
+
+        Flags:
+        --days N: Generate report for last N days (default: 1)
+        """
+        if not self.daily_report_generator or not self.report_aggregator:
+            yield event.plain_result("每日报告功能未启用。请确保已配置 AI 总结功能（需要 OpenRouter API Key）。")
+            return
+
+        yield event.plain_result("开始生成每日内容报告...")
+
+        try:
+            # Parse command flags
+            text = event.message_str.strip()
+            parts = text.split()
+
+            # Parse --days flag
+            days = 1
+            if "--days" in parts:
+                try:
+                    days_idx = parts.index("--days")
+                    if days_idx + 1 < len(parts):
+                        days = int(parts[days_idx + 1])
+                        days = max(1, min(days, 7))  # Limit to 1-7 days
+                except (ValueError, IndexError):
+                    yield event.plain_result("⚠️ --days 参数格式错误，使用默认值 1 天")
+                    days = 1
+
+            # Collect content from last N days
+            since = datetime.now() - timedelta(days=days)
+
+            # Load Bilibili state and get recent reports
+            # Note: Current implementation doesn't store historical reports in state
+            # For now, we'll create an empty list - this is a known limitation
+            bili_reports: list[Any] = []
+
+            # Load Zhihu state and get recent reports
+            # Note: Current implementation doesn't store historical reports in state
+            # For now, we'll create an empty list - this is a known limitation
+            zhihu_reports: list[Any] = []
+
+            # Create report config from plugin config
+            report_config = DailyReportConfig(
+                enabled=True,
+                generation_time=self.config.get("daily_report_time", "09:00"),
+                include_bilibili=self.config.get("daily_report_include_bilibili", True),
+                include_zhihu=self.config.get("daily_report_include_zhihu", True),
+                categorize_content=self.config.get("daily_report_categorize", True),
+                generate_ai_summary=self.config.get("daily_report_ai_summary", True),
+                highlight_important=True,
+                max_items_per_category=self.config.get("daily_report_max_items", 10),
+                min_importance_score=self.config.get("daily_report_min_importance", 0.3),
+                output_format="markdown",
+                include_statistics=True,
+                include_trending=True
+            )
+
+            # Aggregate content
+            report = self.report_aggregator.aggregate_all(
+                bilibili_reports=bili_reports,
+                zhihu_reports=zhihu_reports,
+                since=since,
+                min_importance=report_config.min_importance_score,
+                max_items_per_category=report_config.max_items_per_category
+            )
+
+            # Check if we have any content
+            if report.total_items == 0:
+                yield event.plain_result(
+                    f"📊 过去 {days} 天没有收集到内容。\n\n"
+                    "💡 提示：每日报告需要从监控任务中收集内容。当前实现的限制是不存储历史报告数据。\n"
+                    "建议：启用自动监控功能，让插件持续收集内容后再查看每日报告。"
+                )
+                return
+
+            # Generate report with charts if enabled
+            chart_enabled = self.config.get("chart_enabled", True)
+            markdown: str | None
+            charts: dict[str, str | bytes]
+            if chart_enabled and self.daily_report_generator.chart_generator:
+                yield event.plain_result(f"正在生成报告和图表（共 {report.total_items} 条内容）...")
+                result = await self.daily_report_generator.generate(
+                    report,
+                    report_config,
+                    include_charts=True
+                )
+
+                if isinstance(result, tuple):
+                    markdown, charts = result
+
+                    # Send markdown report
+                    if markdown:
+                        yield event.plain_result(markdown)
+
+                    # Send charts (if any)
+                    if charts:
+                        yield event.plain_result(f"\n📊 生成了 {len(charts)} 个图表")
+                        # Note: Sending chart images would require image message support
+                        # For now, we just notify that charts were generated
+                        if self.config.get("chart_save_to_file", False):
+                            chart_dir = self.config.get("chart_output_dir", "data/charts")
+                            yield event.plain_result(f"图表已保存到: {chart_dir}/")
+                else:
+                    # result is str in this case
+                    if isinstance(result, str):
+                        markdown = result
+                        if markdown:
+                            yield event.plain_result(markdown)
+            else:
+                yield event.plain_result(f"正在生成报告（共 {report.total_items} 条内容）...")
+                result = await self.daily_report_generator.generate(
+                    report,
+                    report_config,
+                    include_charts=False
+                )
+                if isinstance(result, tuple):
+                    markdown, _ = result
+                else:
+                    markdown = result
+                if markdown:
+                    yield event.plain_result(markdown)
+
+            logger.info(f"手动生成每日报告成功 (days={days}, items={report.total_items})")
+
+        except Exception as e:
+            logger.error(f"生成每日报告失败: {e}", exc_info=True)
+            yield event.plain_result(f"生成报告失败：{e}")
+
     async def terminate(self):
         """Clean up plugin resources on shutdown."""
         logger.info("正在停止内容监控与分析插件...")
@@ -708,3 +1016,738 @@ class SASTPlugin(Star):
                 pass
 
         logger.info("内容监控与分析插件已停止")
+
+    @filter.command("search")
+    async def handle_search(self, event: AstrMessageEvent):
+        """
+        Search through monitored content.
+
+        Usage:
+            /search <keywords> [--category <category>] [--source <source>] [--days <N>] [--limit <N>]
+
+        Examples:
+            /search Python 机器学习
+            /search 编程 --category technology
+            /search --source bilibili --days 7
+            /search AI --limit 10
+        """
+        # Parse command
+        message_str = event.message_str
+        parts = message_str.split(maxsplit=1)
+
+        if len(parts) < 2:
+            yield event.plain_result(
+                "📖 搜索命令使用说明\n\n"
+                "用法: /search <关键词> [选项]\n\n"
+                "选项:\n"
+                "  --category <类别>  按类别筛选 (technology/entertainment/education/news/lifestyle/other)\n"
+                "  --source <来源>    按来源筛选 (bilibili/zhihu)\n"
+                "  --days <天数>      搜索最近N天的内容 (默认: 30)\n"
+                "  --limit <数量>     限制结果数量 (默认: 20)\n"
+                "  --sort <排序>      排序方式 (relevance/date/importance, 默认: relevance)\n\n"
+                "示例:\n"
+                "  /search Python 机器学习\n"
+                "  /search 编程 --category technology\n"
+                "  /search --source bilibili --days 7\n"
+                "  /search AI --limit 10 --sort importance"
+            )
+            return
+
+        # Parse arguments
+        args_str = parts[1]
+        flags = parse_command_flags(args_str)
+
+        # Extract keywords (everything that's not a flag)
+        keywords = []
+        words = args_str.split()
+        i = 0
+        while i < len(words):
+            if words[i].startswith("--"):
+                # Skip flag and its value
+                i += 2
+            else:
+                keywords.append(words[i])
+                i += 1
+
+        # Build search query
+        from models.report import ContentCategory, ContentSource
+
+        query = SearchQuery(
+            keywords=keywords,
+            limit=int(flags.get("limit", 20)),
+            sort_by=flags.get("sort", "relevance")
+        )
+
+        # Parse category filter
+        if "category" in flags:
+            try:
+                category = ContentCategory(flags["category"].lower())
+                query.categories = [category]
+            except ValueError:
+                yield event.plain_result(
+                    f"❌ 无效的类别: {flags['category']}\n\n"
+                    "有效类别: technology, entertainment, education, news, lifestyle, other"
+                )
+                return
+
+        # Parse source filter
+        if "source" in flags:
+            try:
+                source = ContentSource(flags["source"].lower())
+                query.sources = [source]
+            except ValueError:
+                yield event.plain_result(
+                    f"❌ 无效的来源: {flags['source']}\n\n"
+                    "有效来源: bilibili, zhihu"
+                )
+                return
+
+        # Parse date range
+        if "days" in flags:
+            try:
+                days = int(flags["days"])
+                query.end_date = datetime.now()
+                query.start_date = query.end_date - timedelta(days=days)
+            except ValueError:
+                yield event.plain_result(f"❌ 无效的天数: {flags['days']}")
+                return
+
+        # Load content history into search engine
+        try:
+            # Load from Bilibili state
+            bili_state = self.bili_state_manager.load_state()
+            if bili_state.content_history:
+                from models.report import ContentItem
+                bili_items = [ContentItem.from_dict(item) for item in bili_state.content_history]
+                self.search_engine.index_content(bili_items)
+
+            # Load from Zhihu state
+            zhihu_state = self.zhihu_state_manager.load_state()
+            if zhihu_state.content_history:
+                from models.report import ContentItem
+                zhihu_items = [ContentItem.from_dict(item) for item in zhihu_state.content_history]
+                self.search_engine.index_content(zhihu_items)
+
+            # Perform search
+            results = self.search_engine.search(query)
+
+            # Format results
+            if not results:
+                yield event.plain_result(
+                    f"🔍 未找到匹配的内容\n\n"
+                    f"搜索关键词: {' '.join(keywords)}\n"
+                    f"提示: 尝试使用不同的关键词或调整筛选条件"
+                )
+                return
+
+            # Build result message
+            lines = [
+                "# 🔍 搜索结果",
+                "",
+                f"**关键词**: {' '.join(keywords)}",
+                f"**结果数**: {len(results)}",
+                ""
+            ]
+
+            # Add filter info
+            if query.categories:
+                lines.append(f"**类别筛选**: {', '.join(c.value for c in query.categories)}")
+            if query.sources:
+                lines.append(f"**来源筛选**: {', '.join(s.value for s in query.sources)}")
+            if query.start_date and query.end_date:
+                lines.append(f"**时间范围**: {query.start_date.strftime('%Y-%m-%d')} 至 {query.end_date.strftime('%Y-%m-%d')}")
+
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+            # Add results
+            for idx, result in enumerate(results, 1):
+                item = result.item
+                lines.append(f"## {idx}. {item.title}")
+
+                if item.author:
+                    lines.append(f"👤 **作者**: {item.author}")
+
+                lines.append(f"📂 **类别**: {item.category.value}")
+                lines.append(f"📍 **来源**: {item.source.value}")
+
+                if item.published:
+                    lines.append(f"📅 **发布**: {item.published.strftime('%Y-%m-%d %H:%M')}")
+
+                lines.append(f"⭐ **重要度**: {item.importance_score:.2f}")
+
+                if result.relevance_score > 0:
+                    lines.append(f"🎯 **相关度**: {result.relevance_score:.2f}")
+
+                if result.matched_fields:
+                    lines.append(f"✅ **匹配字段**: {', '.join(result.matched_fields)}")
+
+                lines.append(f"🔗 **链接**: {item.url}")
+
+                if item.summary:
+                    # Truncate summary if too long
+                    summary = item.summary[:200] + "..." if len(item.summary) > 200 else item.summary
+                    lines.append(f"\n{summary}")
+
+                lines.append("")
+
+            # Add statistics
+            stats = self.search_engine.get_statistics()
+            lines.append("---")
+            lines.append("")
+            lines.append("## 📊 索引统计")
+            lines.append(f"- 总内容数: {stats['total_items']}")
+            if stats['by_source']:
+                lines.append(f"- 按来源: {', '.join(f'{k}({v})' for k, v in stats['by_source'].items())}")
+            if stats['by_category']:
+                lines.append(f"- 按类别: {', '.join(f'{k}({v})' for k, v in stats['by_category'].items())}")
+
+            yield event.plain_result("\n".join(lines))
+
+        except Exception as e:
+            logger.error(f"搜索失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 搜索失败: {str(e)}")
+
+    @filter.command("filter")
+    async def handle_filter(self, event: AstrMessageEvent):
+        """
+        Filter monitored content by various criteria.
+
+        Usage:
+            /filter [--category <category>] [--source <source>] [--min-importance <score>] [--days <N>] [--limit <N>]
+
+        Examples:
+            /filter --category technology
+            /filter --source bilibili --min-importance 0.7
+            /filter --days 7 --limit 15
+        """
+        # Parse command
+        message_str = event.message_str
+        parts = message_str.split(maxsplit=1)
+
+        # Parse flags
+        flags = {}
+        if len(parts) > 1:
+            flags = parse_command_flags(parts[1])
+
+        # Build search query
+        from models.report import ContentCategory, ContentSource
+
+        query = SearchQuery(
+            keywords=[],  # No keyword search, just filtering
+            limit=int(flags.get("limit", 20)),
+            sort_by=flags.get("sort", "date"),
+            sort_order="desc"
+        )
+
+        # Parse category filter
+        if "category" in flags:
+            try:
+                category = ContentCategory(flags["category"].lower())
+                query.categories = [category]
+            except ValueError:
+                yield event.plain_result(
+                    f"❌ 无效的类别: {flags['category']}\n\n"
+                    "有效类别: technology, entertainment, education, news, lifestyle, other"
+                )
+                return
+
+        # Parse source filter
+        if "source" in flags:
+            try:
+                source = ContentSource(flags["source"].lower())
+                query.sources = [source]
+            except ValueError:
+                yield event.plain_result(
+                    f"❌ 无效的来源: {flags['source']}\n\n"
+                    "有效来源: bilibili, zhihu"
+                )
+                return
+
+        # Parse importance filter
+        if "min-importance" in flags or "min_importance" in flags:
+            try:
+                min_imp = float(flags.get("min-importance", flags.get("min_importance", 0)))
+                query.min_importance = min_imp
+            except ValueError:
+                yield event.plain_result(f"❌ 无效的重要度: {flags.get('min-importance', flags.get('min_importance'))}")
+                return
+
+        if "max-importance" in flags or "max_importance" in flags:
+            try:
+                max_imp = float(flags.get("max-importance", flags.get("max_importance", 1.0)))
+                query.max_importance = max_imp
+            except ValueError:
+                yield event.plain_result(f"❌ 无效的重要度: {flags.get('max-importance', flags.get('max_importance'))}")
+                return
+
+        # Parse date range
+        if "days" in flags:
+            try:
+                days = int(flags["days"])
+                query.end_date = datetime.now()
+                query.start_date = query.end_date - timedelta(days=days)
+            except ValueError:
+                yield event.plain_result(f"❌ 无效的天数: {flags['days']}")
+                return
+
+        # Load content history into search engine
+        try:
+            # Clear previous index
+            self.search_engine.clear_index()
+
+            # Load from Bilibili state
+            bili_state = self.bili_state_manager.load_state()
+            if bili_state.content_history:
+                from models.report import ContentItem
+                bili_items = [ContentItem.from_dict(item) for item in bili_state.content_history]
+                self.search_engine.index_content(bili_items)
+
+            # Load from Zhihu state
+            zhihu_state = self.zhihu_state_manager.load_state()
+            if zhihu_state.content_history:
+                from models.report import ContentItem
+                zhihu_items = [ContentItem.from_dict(item) for item in zhihu_state.content_history]
+                self.search_engine.index_content(zhihu_items)
+
+            # Perform search (filtering only)
+            results = self.search_engine.search(query)
+
+            # Format results
+            if not results:
+                filter_desc = []
+                if query.categories:
+                    filter_desc.append(f"类别={', '.join(c.value for c in query.categories)}")
+                if query.sources:
+                    filter_desc.append(f"来源={', '.join(s.value for s in query.sources)}")
+                if query.min_importance:
+                    filter_desc.append(f"最低重要度={query.min_importance}")
+                if query.start_date and query.end_date:
+                    filter_desc.append(f"时间范围={query.start_date.strftime('%Y-%m-%d')} 至 {query.end_date.strftime('%Y-%m-%d')}")
+
+                yield event.plain_result(
+                    f"🔍 未找到匹配的内容\n\n"
+                    f"筛选条件: {', '.join(filter_desc) if filter_desc else '无'}\n"
+                    f"提示: 尝试调整筛选条件"
+                )
+                return
+
+            # Build result message
+            lines = [
+                "# 🔍 筛选结果",
+                "",
+                f"**结果数**: {len(results)}",
+                ""
+            ]
+
+            # Add filter info
+            if query.categories:
+                lines.append(f"**类别**: {', '.join(c.value for c in query.categories)}")
+            if query.sources:
+                lines.append(f"**来源**: {', '.join(s.value for s in query.sources)}")
+            if query.min_importance:
+                lines.append(f"**最低重要度**: {query.min_importance}")
+            if query.max_importance and query.max_importance < 1.0:
+                lines.append(f"**最高重要度**: {query.max_importance}")
+            if query.start_date and query.end_date:
+                lines.append(f"**时间范围**: {query.start_date.strftime('%Y-%m-%d')} 至 {query.end_date.strftime('%Y-%m-%d')}")
+
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+            # Add results
+            for idx, result in enumerate(results, 1):
+                item = result.item
+                lines.append(f"## {idx}. {item.title}")
+
+                if item.author:
+                    lines.append(f"👤 **作者**: {item.author}")
+
+                lines.append(f"📂 **类别**: {item.category.value}")
+                lines.append(f"📍 **来源**: {item.source.value}")
+
+                if item.published:
+                    lines.append(f"📅 **发布**: {item.published.strftime('%Y-%m-%d %H:%M')}")
+
+                lines.append(f"⭐ **重要度**: {item.importance_score:.2f}")
+                lines.append(f"🔗 **链接**: {item.url}")
+
+                if item.summary:
+                    # Truncate summary if too long
+                    summary = item.summary[:200] + "..." if len(item.summary) > 200 else item.summary
+                    lines.append(f"\n{summary}")
+
+                lines.append("")
+
+            # Add statistics
+            stats = self.search_engine.get_statistics()
+            lines.append("---")
+            lines.append("")
+            lines.append("## 📊 索引统计")
+            lines.append(f"- 总内容数: {stats['total_items']}")
+            if stats['by_source']:
+                lines.append(f"- 按来源: {', '.join(f'{k}({v})' for k, v in stats['by_source'].items())}")
+            if stats['by_category']:
+                lines.append(f"- 按类别: {', '.join(f'{k}({v})' for k, v in stats['by_category'].items())}")
+
+            yield event.plain_result("\n".join(lines))
+
+        except Exception as e:
+            logger.error(f"筛选失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 筛选失败: {str(e)}")
+
+    @filter.command("export")
+    async def handle_export(self, event: AstrMessageEvent):
+        """
+        Export daily report in various formats.
+
+        Usage:
+            /export [--days N] [--format json|markdown|html] [--charts] [--output filename]
+
+        Flags:
+            --days N: Generate report for last N days (default: 1)
+            --format: Export format (json/markdown/html, default: json)
+            --charts: Include charts in export
+            --output: Custom output filename
+
+        Examples:
+            /export
+            /export --format markdown
+            /export --days 7 --format html --charts
+            /export --format json --output my_report.json
+        """
+        try:
+            # Parse command flags
+            flags = parse_command_flags(event.message_str)
+
+            # Get parameters
+            days = int(flags.get("days", 1))
+            export_format = flags.get("format", "json").lower()
+            include_charts = "charts" in flags
+            custom_filename = flags.get("output")
+
+            # Validate format
+            if export_format not in ["json", "markdown", "html"]:
+                yield event.plain_result("❌ 不支持的格式。支持的格式: json, markdown, html")
+                return
+
+            # Validate days
+            if days < 1 or days > 30:
+                yield event.plain_result("❌ 天数必须在 1-30 之间")
+                return
+
+            yield event.plain_result(f"📤 正在生成 {days} 天的报告并导出为 {export_format.upper()} 格式...")
+
+            # Generate report
+            report = await self._generate_daily_report(days)
+
+            if not report:
+                yield event.plain_result("❌ 生成报告失败，请检查是否有监控数据")
+                return
+
+            # Generate charts if requested
+            charts: dict[str, str | bytes] | None = None
+            if include_charts and chart_available():
+                try:
+                    from utils.chart_generator import ChartGenerator
+
+                    chart_gen = ChartGenerator()
+                    charts = {}
+
+                    # Generate category distribution chart (bar chart)
+                    chart_result = await chart_gen.generate_category_distribution_bar(report)
+                    if chart_result:
+                        charts["category_distribution"] = chart_result
+
+                    # Generate importance distribution chart
+                    chart_result = await chart_gen.generate_importance_distribution(report)
+                    if chart_result:
+                        charts["importance_distribution"] = chart_result
+
+                except Exception as e:
+                    logger.warning(f"生成图表失败: {e}")
+                    charts = {}
+
+            # Export report
+            result = self.report_exporter.export_report(
+                report=report,
+                format=export_format,
+                filename=custom_filename,
+                charts=charts
+            )
+
+            if result.success:
+                lines = [
+                    "✅ 报告导出成功！",
+                    "",
+                    f"📁 文件路径: {result.file_path}",
+                    f"📊 格式: {result.format.upper() if result.format else 'UNKNOWN'}",
+                    f"💾 文件大小: {result.size_bytes:,} 字节 ({result.size_bytes / 1024:.2f} KB)",
+                    "",
+                    "📋 报告内容:",
+                    f"- 总内容数: {report.total_items}",
+                    f"- B站视频: {report.bilibili_items}",
+                    f"- 知乎内容: {report.zhihu_items}",
+                    f"- 分类数: {len(report.sections)}"
+                ]
+
+                if charts:
+                    lines.extend([
+                        "",
+                        f"📊 包含图表: {len(charts)} 个"
+                    ])
+
+                yield event.plain_result("\n".join(lines))
+            else:
+                yield event.plain_result(f"❌ 导出失败: {result.error}")
+
+        except ValueError as e:
+            yield event.plain_result(f"❌ 参数错误: {str(e)}")
+        except Exception as e:
+            logger.error(f"导出失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 导出失败: {str(e)}")
+
+    @filter.command("archive")
+    async def handle_archive(self, event: AstrMessageEvent):
+        """
+        Manage report archives.
+
+        Usage:
+            /archive [action] [options]
+
+        Actions:
+            list: List archived reports (default)
+            save: Archive current daily report
+            view <id>: View archived report details
+            delete <id>: Delete an archived report
+            cleanup: Delete old archives (90+ days)
+            stats: Show archive statistics
+
+        Flags (for list):
+            --days N: List archives from last N days
+            --limit N: Limit number of results
+
+        Examples:
+            /archive
+            /archive list --days 30
+            /archive save
+            /archive view 20250101
+            /archive delete 20250101
+            /archive cleanup
+            /archive stats
+        """
+        try:
+            # Parse command
+            parts = event.message_str.split(maxsplit=1)
+            action = "list"
+            args = ""
+
+            if len(parts) > 1:
+                rest = parts[1].strip()
+                if rest:
+                    action_parts = rest.split(maxsplit=1)
+                    action = action_parts[0].lower()
+                    args = action_parts[1] if len(action_parts) > 1 else ""
+
+            # Handle different actions
+            if action == "list":
+                await self._handle_archive_list(event, args)
+            elif action == "save":
+                await self._handle_archive_save(event, args)
+            elif action == "view":
+                await self._handle_archive_view(event, args)
+            elif action == "delete":
+                await self._handle_archive_delete(event, args)
+            elif action == "cleanup":
+                await self._handle_archive_cleanup(event, args)
+            elif action == "stats":
+                await self._handle_archive_stats(event, args)
+            else:
+                yield event.plain_result(
+                    f"❌ 未知操作: {action}\n"
+                    "支持的操作: list, save, view, delete, cleanup, stats"
+                )
+
+        except Exception as e:
+            logger.error(f"归档操作失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 归档操作失败: {str(e)}")
+
+    async def _handle_archive_list(self, event: AstrMessageEvent, args: str):
+        """Handle archive list command."""
+        flags = parse_command_flags(args.split())
+
+        days = int(flags.get("days", 0)) if "days" in flags else None
+        limit = int(flags.get("limit", 20))
+
+        # Get date range
+        start_date = None
+        if days:
+            start_date = datetime.now() - timedelta(days=days)
+
+        # List archives
+        archives = self.archive_manager.list_archives(
+            start_date=start_date,
+            limit=limit
+        )
+
+        if not archives:
+            yield event.plain_result("📦 暂无归档报告")
+            return
+
+        lines = [
+            f"📦 归档报告列表 (共 {len(archives)} 个)",
+            ""
+        ]
+
+        for idx, archive in enumerate(archives, 1):
+            lines.extend([
+                f"{idx}. **{archive.archive_id}**",
+                f"   📅 报告日期: {archive.report_date.strftime('%Y-%m-%d')}",
+                f"   🕐 归档时间: {archive.archived_at.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"   📊 内容数: {archive.total_items} (B站: {archive.bilibili_items}, 知乎: {archive.zhihu_items})",
+                f"   💾 文件大小: {archive.file_size:,} 字节 ({archive.file_size / 1024:.2f} KB)",
+                ""
+            ])
+
+        yield event.plain_result("\n".join(lines))
+
+    async def _handle_archive_save(self, event: AstrMessageEvent, args: str):
+        """Handle archive save command."""
+        flags = parse_command_flags(args.split())
+        days = int(flags.get("days", 1))
+
+        yield event.plain_result(f"📦 正在生成并归档 {days} 天的报告...")
+
+        # Generate report
+        report = await self._generate_daily_report(days)
+
+        if not report:
+            yield event.plain_result("❌ 生成报告失败，请检查是否有监控数据")
+            return
+
+        # Archive report
+        metadata = self.archive_manager.archive_report(report)
+
+        if metadata:
+            lines = [
+                "✅ 报告归档成功！",
+                "",
+                f"📦 归档ID: {metadata.archive_id}",
+                f"📅 报告日期: {metadata.report_date.strftime('%Y-%m-%d')}",
+                f"📊 内容数: {metadata.total_items}",
+                f"💾 文件大小: {metadata.file_size:,} 字节 ({metadata.file_size / 1024:.2f} KB)",
+                f"📁 文件路径: {metadata.file_path}"
+            ]
+            yield event.plain_result("\n".join(lines))
+        else:
+            yield event.plain_result("❌ 归档失败")
+
+    async def _handle_archive_view(self, event: AstrMessageEvent, args: str):
+        """Handle archive view command."""
+        archive_id = args.strip()
+
+        if not archive_id:
+            yield event.plain_result("❌ 请指定归档ID，例如: /archive view 20250101")
+            return
+
+        # Load report
+        report = self.archive_manager.load_report(archive_id)
+
+        if not report:
+            yield event.plain_result(f"❌ 未找到归档: {archive_id}")
+            return
+
+        # Display report summary
+        lines = [
+            f"📦 归档报告: {archive_id}",
+            "",
+            f"📋 {report.title}",
+            f"📅 报告日期: {report.report_date.strftime('%Y年%m月%d日')}",
+            "",
+            "## 📊 统计信息",
+            f"- 总内容数: {report.total_items}",
+            f"- B站视频: {report.bilibili_items}",
+            f"- 知乎内容: {report.zhihu_items}",
+            f"- 分类数: {len(report.sections)}",
+            ""
+        ]
+
+        if report.executive_summary:
+            lines.extend([
+                "## 📋 执行摘要",
+                report.executive_summary,
+                ""
+            ])
+
+        if report.trending_topics:
+            topics_str = " · ".join(report.trending_topics)
+            lines.extend([
+                "## 🔥 热门话题",
+                topics_str,
+                ""
+            ])
+
+        # Show sections summary
+        lines.append("## 📂 内容分类")
+        for section in report.sections:
+            lines.append(f"- {section.category.value}: {len(section.items)} 项")
+
+        yield event.plain_result("\n".join(lines))
+
+    async def _handle_archive_delete(self, event: AstrMessageEvent, args: str):
+        """Handle archive delete command."""
+        archive_id = args.strip()
+
+        if not archive_id:
+            yield event.plain_result("❌ 请指定归档ID，例如: /archive delete 20250101")
+            return
+
+        # Delete archive
+        success = self.archive_manager.delete_archive(archive_id)
+
+        if success:
+            yield event.plain_result(f"✅ 已删除归档: {archive_id}")
+        else:
+            yield event.plain_result(f"❌ 删除失败: {archive_id}")
+
+    async def _handle_archive_cleanup(self, event: AstrMessageEvent, args: str):
+        """Handle archive cleanup command."""
+        flags = parse_command_flags(args.split())
+        days = int(flags.get("days", 90))
+
+        yield event.plain_result(f"🧹 正在清理 {days} 天前的归档...")
+
+        deleted_count = self.archive_manager.cleanup_old_archives(days)
+
+        if deleted_count > 0:
+            yield event.plain_result(f"✅ 已清理 {deleted_count} 个旧归档")
+        else:
+            yield event.plain_result("✅ 没有需要清理的归档")
+
+    async def _handle_archive_stats(self, event: AstrMessageEvent, args: str):
+        """Handle archive stats command."""
+        stats = self.archive_manager.get_statistics()
+
+        if stats["total_archives"] == 0:
+            yield event.plain_result("📦 暂无归档报告")
+            return
+
+        lines = [
+            "📊 归档统计信息",
+            "",
+            f"📦 总归档数: {stats['total_archives']}",
+            f"💾 总大小: {stats['total_size_mb']} MB ({stats['total_size_bytes']:,} 字节)",
+            f"📝 总内容数: {stats['total_items']}",
+            ""
+        ]
+
+        if stats["date_range"]:
+            lines.extend([
+                "📅 日期范围:",
+                f"- 最早: {stats['date_range']['earliest']}",
+                f"- 最新: {stats['date_range']['latest']}"
+            ])
+
+        yield event.plain_result("\n".join(lines))

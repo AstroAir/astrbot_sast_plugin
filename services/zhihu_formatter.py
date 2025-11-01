@@ -120,8 +120,7 @@ class ZhihuFormatter:
             List of cell values
         """
         bilibili_count = len(item.bilibili_links) if item.bilibili_links else 0
-        bilibili_indicator = "✓" if bilibili_count > 0 else "-"
-        
+
         return [
             f"[{item.title}]({item.link})",
             item.author or "-",

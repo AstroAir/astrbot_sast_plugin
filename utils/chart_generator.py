@@ -12,22 +12,26 @@ import asyncio
 import io
 import base64
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 from collections import defaultdict, Counter
 
 try:
-    import matplotlib
+    import matplotlib  # type: ignore
     matplotlib.use('Agg')  # Use non-interactive backend
-    import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
-    from matplotlib.figure import Figure
+    import matplotlib.pyplot as plt  # type: ignore
+    import matplotlib.dates as mdates  # type: ignore
+    import matplotlib.cm as cm  # type: ignore
     import numpy as np
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
+    plt = None  # type: ignore
+    mdates = None  # type: ignore
+    cm = None  # type: ignore
+    np = None  # type: ignore
 
-from models.report import DailyReport, ContentCategory, ContentSource
+from models.report import DailyReport
 
 
 class ChartConfig:
@@ -79,22 +83,25 @@ class ChartGenerator:
             raise ImportError("matplotlib is not installed. Install it with: pip install matplotlib")
         
         # Set matplotlib style
-        if self.config.style in plt.style.available:
+        if plt is not None and hasattr(plt, 'style') and self.config.style in plt.style.available:
             plt.style.use(self.config.style)
         
-        # Define color schemes
+        # Define color schemes using get_cmap
         self.color_schemes = {
-            "default": plt.cm.Set3.colors,
-            "pastel": plt.cm.Pastel1.colors,
-            "vibrant": plt.cm.Set1.colors,
+            "default": cm.get_cmap('Set3').colors if cm is not None else None,
+            "pastel": cm.get_cmap('Pastel1').colors if cm is not None else None,
+            "vibrant": cm.get_cmap('Set1').colors if cm is not None else None,
         }
     
     def _get_colors(self, n: int) -> list:
         """Get n colors from the configured color scheme."""
         scheme = self.color_schemes.get(self.config.color_scheme, self.color_schemes["default"])
+        if scheme is None:
+            # Fallback colors if matplotlib is not available
+            return ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'][:n]
         return [scheme[i % len(scheme)] for i in range(n)]
     
-    async def _save_or_encode_figure(self, fig: Figure, filename: str) -> str | bytes:
+    async def _save_or_encode_figure(self, fig: Any, filename: str) -> str | bytes:
         """Save figure to file or encode as base64."""
         def _save():
             buf = io.BytesIO()
@@ -119,12 +126,13 @@ class ChartGenerator:
         # Run in thread pool to avoid blocking
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, _save)
-        plt.close(fig)
+        if plt is not None:
+            plt.close(fig)
         return result
     
     async def generate_category_distribution_pie(self, report: DailyReport) -> str | bytes | None:
         """Generate pie chart showing content distribution by category."""
-        if not report.sections:
+        if not report.sections or plt is None:
             return None
         
         def _generate():
@@ -136,7 +144,7 @@ class ChartGenerator:
             
             # Create pie chart
             colors = self._get_colors(len(categories))
-            wedges, texts, autotexts = ax.pie(
+            pie_result = ax.pie(
                 counts,
                 labels=categories,
                 autopct='%1.1f%%',
@@ -144,10 +152,13 @@ class ChartGenerator:
                 startangle=90
             )
             
-            # Styling
-            for autotext in autotexts:
-                autotext.set_color('white')
-                autotext.set_fontweight('bold')
+            # Handle both 2-tuple and 3-tuple returns
+            if len(pie_result) == 3:
+                autotexts = pie_result[2]
+                # Styling
+                for autotext in autotexts:
+                    autotext.set_color('white')
+                    autotext.set_fontweight('bold')
             
             ax.set_title('Content Distribution by Category', fontsize=14, fontweight='bold')
             
@@ -159,7 +170,7 @@ class ChartGenerator:
     
     async def generate_category_distribution_bar(self, report: DailyReport) -> str | bytes | None:
         """Generate bar chart showing content distribution by category."""
-        if not report.sections:
+        if not report.sections or plt is None:
             return None
         
         def _generate():
@@ -201,7 +212,7 @@ class ChartGenerator:
         for section in report.sections:
             scores.extend([item.importance_score for item in section.items])
         
-        if not scores:
+        if not scores or plt is None or np is None:
             return None
         
         def _generate():
@@ -211,14 +222,18 @@ class ChartGenerator:
             n, bins, patches = ax.hist(scores, bins=20, color='skyblue', edgecolor='black', alpha=0.7)
             
             # Color bars by importance level
-            for i, patch in enumerate(patches):
-                bin_center = (bins[i] + bins[i+1]) / 2
-                if bin_center >= 0.7:
-                    patch.set_facecolor('green')
-                elif bin_center >= 0.4:
-                    patch.set_facecolor('orange')
-                else:
-                    patch.set_facecolor('red')
+            # Handle both list and BarContainer types
+            if hasattr(patches, '__iter__'):
+                patch_list = list(patches) if not isinstance(patches, list) else patches
+                for i, patch in enumerate(patch_list):
+                    if i < len(bins) - 1:
+                        bin_center = (bins[i] + bins[i+1]) / 2
+                        if bin_center >= 0.7:
+                            patch.set_facecolor('green')
+                        elif bin_center >= 0.4:
+                            patch.set_facecolor('orange')
+                        else:
+                            patch.set_facecolor('red')
             
             ax.set_xlabel('Importance Score', fontsize=12, fontweight='bold')
             ax.set_ylabel('Number of Items', fontsize=12, fontweight='bold')
@@ -239,12 +254,12 @@ class ChartGenerator:
     async def generate_top_sources(self, report: DailyReport, top_n: int = 10) -> str | bytes | None:
         """Generate bar chart showing top sources by content count."""
         # Count items by source
-        source_counts = Counter()
+        source_counts: Counter[str] = Counter()
         for section in report.sections:
             for item in section.items:
                 source_counts[item.source.value] += 1
         
-        if not source_counts:
+        if not source_counts or plt is None:
             return None
         
         def _generate():
@@ -287,7 +302,7 @@ class ChartGenerator:
                 if item.published:
                     posting_times.append(item.published)
 
-        if not posting_times:
+        if not posting_times or plt is None or np is None:
             return None
 
         def _generate():
@@ -323,9 +338,9 @@ class ChartGenerator:
                 for j in range(24):
                     count = int(heatmap_data[i, j])
                     if count > 0:
-                        text = ax.text(j, i, count, ha="center", va="center",
-                                     color="white" if count > heatmap_data.max()/2 else "black",
-                                     fontsize=8, fontweight='bold')
+                        ax.text(j, i, str(count), ha="center", va="center",
+                               color="white" if count > heatmap_data.max()/2 else "black",
+                               fontsize=8, fontweight='bold')
 
             ax.set_title('Content Posting Activity Heatmap', fontsize=14, fontweight='bold')
             ax.set_xlabel('Hour of Day', fontsize=12, fontweight='bold')
@@ -346,7 +361,7 @@ class ChartGenerator:
                 if item.published:
                     posting_times.append(item.published)
 
-        if not posting_times:
+        if not posting_times or plt is None or mdates is None:
             return None
 
         def _generate():

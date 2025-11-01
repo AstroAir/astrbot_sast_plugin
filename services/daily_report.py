@@ -7,8 +7,6 @@ visualizations, and multiple output formats.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from typing import Literal
 
 from models.report import DailyReport, DailyReportConfig, ContentCategory, CategorySection
 from utils.openrouter_client import summarize_batch, ORSummaryOptions
@@ -87,10 +85,10 @@ class DailyReportGenerator:
             )
             
             prompt = f"请为以下{section.category.value}类别的内容生成一个简洁的总结（100字以内）：\n\n{combined_text}"
-            
-            results = await summarize_batch([prompt], options)
+
+            results = await summarize_batch([(None, prompt)], options)
             if results and results[0]:
-                return results[0]
+                return results[0].get("summary")
         except Exception as e:
             logger.error(f"Failed to generate section summary: {e}")
         
@@ -140,10 +138,10 @@ class DailyReportGenerator:
             )
             
             prompt = f"请为以下每日内容汇总生成一个执行摘要（150字以内），突出重点和趋势：\n\n{combined_text}"
-            
-            results = await summarize_batch([prompt], options)
+
+            results = await summarize_batch([(None, prompt)], options)
             if results and results[0]:
-                return results[0]
+                return results[0].get("summary")
         except Exception as e:
             logger.error(f"Failed to generate executive summary: {e}")
         

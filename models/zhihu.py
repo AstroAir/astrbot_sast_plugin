@@ -105,15 +105,17 @@ class ZhihuFeedState:
 @dataclass
 class ZhihuMonitorState:
     """Global state for Zhihu RSS monitoring."""
-    
+
     feeds: dict[str, ZhihuFeedState] = field(default_factory=dict)
-    
+    content_history: list[dict[str, Any]] = field(default_factory=list)  # Searchable content history
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
-            'feeds': {url: state.to_dict() for url, state in self.feeds.items()}
+            'feeds': {url: state.to_dict() for url, state in self.feeds.items()},
+            'content_history': self.content_history
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ZhihuMonitorState:
         """Create from dictionary."""
@@ -121,13 +123,24 @@ class ZhihuMonitorState:
         if 'feeds' in data:
             for url, state_data in data['feeds'].items():
                 feeds[url] = ZhihuFeedState.from_dict(state_data)
-        return cls(feeds=feeds)
-    
+        content_history = data.get('content_history', [])
+        return cls(feeds=feeds, content_history=content_history)
+
     def get_or_create_feed_state(self, feed_url: str, name: str | None = None) -> ZhihuFeedState:
         """Get existing feed state or create new one."""
         if feed_url not in self.feeds:
             self.feeds[feed_url] = ZhihuFeedState(feed_url=feed_url, name=name)
         return self.feeds[feed_url]
+
+    def add_content_to_history(self, content_item: dict[str, Any]) -> None:
+        """Add a content item to searchable history."""
+        self.content_history.append(content_item)
+
+    def cleanup_old_history(self, max_items: int = 1000) -> None:
+        """Remove old content history to prevent state file from growing too large."""
+        if len(self.content_history) > max_items:
+            # Keep only the most recent items
+            self.content_history = self.content_history[-max_items:]
 
 
 @dataclass

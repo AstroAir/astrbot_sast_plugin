@@ -12,11 +12,11 @@ from typing import Callable, Any, Awaitable
 from dataclasses import dataclass, field
 
 try:
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from apscheduler.triggers.cron import CronTrigger
-    from apscheduler.triggers.interval import IntervalTrigger
-    from apscheduler.triggers.date import DateTrigger
-    from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, JobExecutionEvent
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
+    from apscheduler.triggers.cron import CronTrigger  # type: ignore
+    from apscheduler.triggers.interval import IntervalTrigger  # type: ignore
+    from apscheduler.triggers.date import DateTrigger  # type: ignore
+    from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, JobExecutionEvent  # type: ignore
     APSCHEDULER_AVAILABLE = True
 except ImportError:
     APSCHEDULER_AVAILABLE = False

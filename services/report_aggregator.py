@@ -7,8 +7,7 @@ for AI-powered daily report generation.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import datetime
 
 from models.report import ContentItem, ContentSource, ContentCategory, DailyReport
 from models.bilibili import MonitorReport as BilibiliMonitorReport
@@ -129,33 +128,36 @@ class ReportAggregator:
         
         for report in reports:
             for video in report.new_videos:
+                # Get publish datetime from timestamp
+                publish_datetime = video.get_publish_datetime()
+
                 # Filter by time if specified
-                if since and video.published and video.published < since:
+                if since and publish_datetime and publish_datetime < since:
                     continue
-                
+
                 # Create content item
-                category = self._categorize_content(video.title, video.description)
+                category = self._categorize_content(video.title, video.desc)
                 importance = self._calculate_importance(
-                    video.published,
-                    bool(video.description),
+                    publish_datetime,
+                    bool(video.desc),
                     ContentSource.BILIBILI
                 )
-                
+
                 item = ContentItem(
                     title=video.title,
                     url=f"https://www.bilibili.com/video/{video.bvid}",
                     source=ContentSource.BILIBILI,
-                    published=video.published,
-                    author=report.up_name,
-                    summary=video.description[:200] if video.description else None,
+                    published=publish_datetime,
+                    author=report.up_master_name,
+                    summary=video.desc[:200] if video.desc else None,
                     category=category,
                     importance_score=importance,
                     tags=[],
                     source_data={
                         'bvid': video.bvid,
-                        'mid': report.mid,
-                        'up_name': report.up_name,
-                        'view_count': video.view_count,
+                        'mid': report.up_master_mid,
+                        'up_name': report.up_master_name,
+                        'view_count': video.play_count,
                         'like_count': video.like_count
                     }
                 )

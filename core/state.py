@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from models.bilibili import MonitorState, UPMasterState, VideoInfo
+    from models.bilibili import MonitorState, UPMasterState
 
 from models.bilibili import MonitorState
 

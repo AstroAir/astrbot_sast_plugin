@@ -6,7 +6,6 @@ Handles AI-powered analysis and summarization of UP master videos.
 from __future__ import annotations
 
 import os
-from typing import Any
 
 from utils.openrouter_client import ORSummaryOptions, summarize_batch
 from models.bilibili import MonitorReport, VideoInfo
